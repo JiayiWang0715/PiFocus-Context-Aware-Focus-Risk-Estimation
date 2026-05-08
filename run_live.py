@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the PiFocus local live demo with one command.
+Run the PiFocus local monitoring pipeline.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ PYTHON = sys.executable or "python"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the PiFocus live demo.")
+    parser = argparse.ArgumentParser(description="Run the PiFocus live monitoring pipeline.")
     parser.add_argument(
         "--task_mode",
         default="writing",
@@ -38,10 +38,31 @@ def parse_args() -> argparse.Namespace:
         help="Seconds between fusion engine runs. Defaults to 3.",
     )
     parser.add_argument(
-        "--camera_interval",
+        "--prediction_interval",
         type=float,
-        default=1,
-        help="Seconds between replayed camera prediction rows. Defaults to 1.",
+        default=3,
+        help="Seconds between camera prediction updates. Defaults to 3.",
+    )
+    parser.add_argument(
+        "--camera_features_csv",
+        default="data/live_camera_features.csv",
+        help="Live camera feature CSV written by the camera feature extractor.",
+    )
+    parser.add_argument(
+        "--camera_predictions_csv",
+        default="data/live_camera_predictions.csv",
+        help="Live camera prediction CSV consumed by the fusion engine.",
+    )
+    parser.add_argument(
+        "--start_camera",
+        action="store_true",
+        help="Start src/pi_camera_feature_extractor.py in this process group.",
+    )
+    parser.add_argument(
+        "--camera_index",
+        type=int,
+        default=0,
+        help="OpenCV camera index passed to the camera feature extractor.",
     )
     return parser.parse_args()
 
@@ -84,13 +105,14 @@ class ProcessManager:
                 process.kill()
 
 
-def fusion_loop(
+def run_repeating_command(
     manager: ProcessManager,
     stop_event: threading.Event,
-    fusion_interval: float,
+    command: list[str],
+    interval: float,
 ) -> None:
     while not stop_event.is_set():
-        process = manager.popen([PYTHON, "src/fusion_engine.py"])
+        process = manager.popen(command)
         try:
             while process.poll() is None and not stop_event.is_set():
                 time.sleep(0.1)
@@ -104,7 +126,7 @@ def fusion_loop(
                 process.wait()
             manager.discard(process)
 
-        stop_event.wait(fusion_interval)
+        stop_event.wait(interval)
 
 
 def main() -> int:
@@ -116,13 +138,12 @@ def main() -> int:
     if args.fusion_interval <= 0:
         print("--fusion_interval must be greater than 0", file=sys.stderr)
         return 2
-    if args.camera_interval <= 0:
-        print("--camera_interval must be greater than 0", file=sys.stderr)
+    if args.prediction_interval <= 0:
+        print("--prediction_interval must be greater than 0", file=sys.stderr)
         return 2
 
     manager = ProcessManager()
     stop_event = threading.Event()
-    dashboard_process: subprocess.Popen[bytes] | None = None
 
     def handle_stop(_signum: int, _frame: object) -> None:
         stop_event.set()
@@ -131,15 +152,18 @@ def main() -> int:
     signal.signal(signal.SIGINT, handle_stop)
     signal.signal(signal.SIGTERM, handle_stop)
 
-    print("Starting camera replay stream...", flush=True)
-    manager.popen(
-        [
-            PYTHON,
-            "src/replay_camera_stream.py",
-            "--interval",
-            str(args.camera_interval),
-        ]
-    )
+    if args.start_camera:
+        print("Starting camera feature extractor...", flush=True)
+        manager.popen(
+            [
+                PYTHON,
+                "src/pi_camera_feature_extractor.py",
+                "--output_csv",
+                args.camera_features_csv,
+                "--camera_index",
+                str(args.camera_index),
+            ]
+        )
 
     print("Starting activity logger...", flush=True)
     manager.popen(
@@ -153,10 +177,40 @@ def main() -> int:
         ]
     )
 
+    print("Starting camera prediction updater...", flush=True)
+    prediction_thread = threading.Thread(
+        target=run_repeating_command,
+        args=(
+            manager,
+            stop_event,
+            [
+                PYTHON,
+                "src/predict_camera_attention.py",
+                "--input_csv",
+                args.camera_features_csv,
+                "--output_csv",
+                args.camera_predictions_csv,
+            ],
+            args.prediction_interval,
+        ),
+        daemon=True,
+    )
+    prediction_thread.start()
+
     print("Starting fusion updater...", flush=True)
     fusion_thread = threading.Thread(
-        target=fusion_loop,
-        args=(manager, stop_event, args.fusion_interval),
+        target=run_repeating_command,
+        args=(
+            manager,
+            stop_event,
+            [
+                PYTHON,
+                "src/fusion_engine.py",
+                "--camera_csv",
+                args.camera_predictions_csv,
+            ],
+            args.fusion_interval,
+        ),
         daemon=True,
     )
     fusion_thread.start()
@@ -168,9 +222,10 @@ def main() -> int:
     except KeyboardInterrupt:
         return 130
     finally:
-        print("Stopping PiFocus demo...", flush=True)
+        print("Stopping PiFocus pipeline...", flush=True)
         stop_event.set()
         manager.terminate_all()
+        prediction_thread.join(timeout=6)
         fusion_thread.join(timeout=6)
 
 

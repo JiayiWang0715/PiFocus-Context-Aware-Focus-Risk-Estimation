@@ -36,8 +36,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--input_csv",
-        default="data/session_features_v2.csv",
-        help="Input camera feature CSV path. Defaults to data/session_features_v2.csv.",
+        default="data/live_camera_features.csv",
+        help="Input camera feature CSV path. Defaults to data/live_camera_features.csv.",
     )
     parser.add_argument(
         "--model_path",
@@ -46,8 +46,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output_csv",
-        default="data/camera_predictions.csv",
-        help="Output predictions CSV path. Defaults to data/camera_predictions.csv.",
+        default="data/live_camera_predictions.csv",
+        help="Output predictions CSV path. Defaults to data/live_camera_predictions.csv.",
     )
     return parser.parse_args()
 

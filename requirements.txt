@@ -4,3 +4,4 @@ scikit-learn
 joblib
 streamlit
 streamlit-autorefresh
+opencv-python
