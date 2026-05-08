@@ -220,10 +220,8 @@ __marimo__/
 # macOS / local editor files
 .DS_Store
 
-# PiFocus runtime outputs and local logs
-data/activity_log.csv
-data/live_camera_predictions.csv
-data/fused_focus_log.csv
+# PiFocus data CSV files are tracked as header-only schemas.
+# Local runs append/update rows in the working tree.
 
 # Python caches
 __pycache__/

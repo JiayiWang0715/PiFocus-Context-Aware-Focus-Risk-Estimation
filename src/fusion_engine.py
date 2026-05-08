@@ -150,12 +150,8 @@ def csv_has_rows(path: Path) -> bool:
 
 
 def resolve_camera_csv(camera_csv: Path) -> Path:
-    fallback_csv = Path("data/camera_predictions.csv")
     if csv_has_rows(camera_csv):
         return camera_csv
-    if camera_csv != fallback_csv and csv_has_rows(fallback_csv):
-        print(f"camera CSV has no rows; falling back to {fallback_csv}")
-        return fallback_csv
     return camera_csv
 
 
