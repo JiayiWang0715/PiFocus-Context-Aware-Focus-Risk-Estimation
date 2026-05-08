@@ -228,3 +228,6 @@ data/fused_focus_log.csv
 # Python caches
 __pycache__/
 *.pyc
+
+# Do not commit local/demo data files
+data/*.csv
