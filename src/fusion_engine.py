@@ -15,7 +15,6 @@ import pandas as pd
 
 
 CAMERA_COLUMNS = {
-    "timestamp",
     "visual_attention_prob",
     "visual_attention_state",
 }
@@ -42,6 +41,8 @@ ON_TASK_KEYWORDS = {
         "notebook",
     ),
     "writing": (
+        "vs code",
+        "visual studio code",
         "google docs",
         "microsoft word",
         "overleaf",
@@ -96,8 +97,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--camera_csv",
-        default="data/camera_predictions.csv",
-        help="Camera predictions CSV path. Defaults to data/camera_predictions.csv.",
+        default="data/live_camera_predictions.csv",
+        help="Camera predictions CSV path. Defaults to data/live_camera_predictions.csv.",
     )
     parser.add_argument(
         "--activity_csv",
@@ -139,6 +140,25 @@ def read_input_csv(path: Path, required_columns: set[str], label: str) -> pd.Dat
     return df
 
 
+def csv_has_rows(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    try:
+        return not pd.read_csv(path, nrows=1).empty
+    except (pd.errors.ParserError, OSError):
+        return False
+
+
+def resolve_camera_csv(camera_csv: Path) -> Path:
+    fallback_csv = Path("data/camera_predictions.csv")
+    if csv_has_rows(camera_csv):
+        return camera_csv
+    if camera_csv != fallback_csv and csv_has_rows(fallback_csv):
+        print(f"camera CSV has no rows; falling back to {fallback_csv}")
+        return fallback_csv
+    return camera_csv
+
+
 def normalize_elapsed_seconds(
     df: pd.DataFrame,
     elapsed_column: str,
@@ -170,9 +190,28 @@ def contains_any(text: str, keywords: Iterable[str]) -> bool:
 
 def task_relevance_score(row: pd.Series) -> float:
     task_mode = str(row.get("task_mode", "")).strip().lower()
-    active_app = str(row.get("active_app", ""))
+    active_app = str(row.get("active_app", "")).strip()
+    active_app_lower = active_app.lower()
     window_title = str(row.get("window_title", ""))
     combined = f"{active_app} {window_title}".lower()
+
+    writing_off_task_apps = {
+        "entertainment site",
+        "youtube",
+        "netflix",
+        "bilibili",
+        "tiktok",
+        "instagram",
+    }
+
+    if task_mode == "writing" and active_app_lower in writing_off_task_apps:
+        return 0.05
+    if task_mode == "writing" and active_app_lower == "vs code":
+        return 0.90
+    if active_app_lower == "away from workspace":
+        return 0.10
+    if active_app_lower == "uncertain activity":
+        return 0.35
 
     score = 0.35
 
@@ -199,22 +238,69 @@ def task_relevance_score(row: pd.Series) -> float:
 def final_state(row: pd.Series) -> str:
     visual_attention_prob = row["visual_attention_prob"]
     task_score = row["task_relevance_score"]
-    smoothed_risk = row["smoothed_risk_score"]
 
-    if (
-        visual_attention_prob >= 0.7
-        and task_score >= 0.7
-        and smoothed_risk < 0.4
-    ):
+    if visual_attention_prob >= 0.65 and task_score >= 0.7:
         return "focused_on_task"
-    if visual_attention_prob >= 0.7 and task_score < 0.5:
+    if visual_attention_prob >= 0.65 and task_score < 0.5:
         return "present_but_off_task"
     if visual_attention_prob < 0.3:
         return "absent_or_disengaged"
     return "uncertain"
 
 
+def add_temporal_risk_columns(fused: pd.DataFrame) -> pd.DataFrame:
+    scored = fused.sort_values("elapsed_seconds").reset_index(drop=True).copy()
+    scored["instantaneous_risk_score"] = 1 - (
+        0.6 * scored["visual_attention_prob"] + 0.4 * scored["task_relevance_score"]
+    )
+    scored["instantaneous_risk_score"] = scored["instantaneous_risk_score"].clip(0, 1)
+
+    accumulated_risk = 0.10
+    consecutive_off_task_seconds = 0.0
+    previous_elapsed_seconds: float | None = None
+    accumulated_scores = []
+    for row in scored.itertuples(index=False):
+        state = row.final_state
+        elapsed_seconds = float(row.elapsed_seconds)
+        if previous_elapsed_seconds is None:
+            elapsed_delta = 1.0
+        else:
+            elapsed_delta = max(0.0, min(elapsed_seconds - previous_elapsed_seconds, 5.0))
+        previous_elapsed_seconds = elapsed_seconds
+
+        if state == "focused_on_task":
+            accumulated_risk -= 0.07
+            consecutive_off_task_seconds = 0.0
+        elif state == "present_but_off_task":
+            accumulated_risk += 0.06
+            consecutive_off_task_seconds += elapsed_delta
+            if consecutive_off_task_seconds > 10:
+                accumulated_risk += 0.03
+        elif state == "absent_or_disengaged":
+            accumulated_risk += 0.06
+            consecutive_off_task_seconds = 0.0
+        else:
+            accumulated_risk += 0.015
+            consecutive_off_task_seconds = 0.0
+
+        accumulated_risk = max(0.0, min(1.0, accumulated_risk))
+        accumulated_scores.append(accumulated_risk)
+
+    scored["accumulated_risk_score"] = accumulated_scores
+    scored["risk_level"] = scored["accumulated_risk_score"].apply(risk_level)
+    return scored
+
+
+def risk_level(score: float) -> str:
+    if score < 0.35:
+        return "Low Risk"
+    if score < 0.65:
+        return "Caution"
+    return "High Risk"
+
+
 def fuse(camera_csv: Path, activity_csv: Path) -> tuple[pd.DataFrame, int, int]:
+    camera_csv = resolve_camera_csv(camera_csv)
     camera_df = read_input_csv(camera_csv, CAMERA_COLUMNS, "camera CSV")
     activity_df = read_input_csv(activity_csv, ACTIVITY_COLUMNS, "activity CSV")
     camera_elapsed_column = detect_elapsed_column(
@@ -270,6 +356,8 @@ def fuse(camera_csv: Path, activity_csv: Path) -> tuple[pd.DataFrame, int, int]:
     fused["window_title"] = fused["window_title"].fillna("")
     fused["task_mode"] = fused["task_mode"].fillna(default_task_mode)
     fused["idle_seconds"] = fused["idle_seconds"].fillna(0)
+    if "timestamp" not in fused.columns:
+        fused["timestamp"] = fused.get("activity_timestamp", "")
 
     fused["task_relevance_score"] = fused.apply(task_relevance_score, axis=1)
     fused["risk_score"] = 1 - (
@@ -280,6 +368,7 @@ def fuse(camera_csv: Path, activity_csv: Path) -> tuple[pd.DataFrame, int, int]:
         fused["risk_score"].rolling(window=5, min_periods=1).mean()
     )
     fused["final_state"] = fused.apply(final_state, axis=1)
+    fused = add_temporal_risk_columns(fused)
 
     return fused, len(camera_df), len(activity_df)
 
@@ -294,6 +383,23 @@ def print_summary(fused: pd.DataFrame, camera_rows: int, activity_rows: int) -> 
     print("final_state counts:")
     for state, count in fused["final_state"].value_counts().items():
         print(f"  {state}: {count}")
+    print("risk_level counts:")
+    for level, count in fused["risk_level"].value_counts().items():
+        print(f"  {level}: {count}")
+    print("first 10 risk rows:")
+    print(
+        fused[
+            [
+                "elapsed_seconds",
+                "visual_attention_prob",
+                "task_relevance_score",
+                "final_state",
+                "accumulated_risk_score",
+            ]
+        ]
+        .head(10)
+        .to_string(index=False)
+    )
 
 
 def main() -> int:

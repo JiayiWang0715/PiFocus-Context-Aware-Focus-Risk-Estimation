@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# macOS / local editor files
+.DS_Store
+
+# PiFocus runtime outputs and local logs
+data/activity_log.csv
+data/live_camera_predictions.csv
+data/fused_focus_log.csv
+
+# Python caches
+__pycache__/
+*.pyc

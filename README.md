@@ -1,184 +1,154 @@
 # PiFocus: Context-Aware Focus Risk Estimation
 
-## Overview
+PiFocus estimates focus risk by combining visual attention signals from a Raspberry Pi camera pipeline with laptop activity context. The core idea is that visual engagement and task focus are not the same: a user can be looking at the screen while still being off task.
 
-PiFocus is an edge-based system that estimates user focus by combining visual attention signals from a Raspberry Pi camera with task context information.
+The system separates the problem into:
 
-Instead of directly predicting "focus" from facial signals, PiFocus separates the problem into:
+- **Visual attention**: whether the user appears present and visually engaged.
+- **Task relevance**: whether the current activity matches the intended task.
+- **Temporal focus risk**: whether off-task or uncertain behavior is sustained over time.
 
-- **Visual Attention**: Is the user behaviorally engaged (e.g., present, facing screen)?
-- **Task Relevance**: Is the user's activity related to their intended task?
+## Current Demo Pipeline
 
-The system then fuses these signals over time to estimate **focus risk**, rather than making fragile binary judgments.
+The current runnable demo is in the structured project folders:
 
----
+```text
+frontend/dashboard.py          Streamlit monitoring dashboard
+laptop/activity_logger.py      Consent-based laptop activity logger
+src/predict_camera_attention.py
+src/replay_camera_stream.py
+src/create_demo_activity_log.py
+src/fusion_engine.py
+run_live_demo.py               One-command local demo runner
+```
 
-## Motivation
+Run the local demo with:
 
-Many existing approaches attempt to infer focus directly from camera data.
+```bash
+python3 run_live_demo.py
+```
 
-However, we observe a key limitation:
+This starts:
 
-> A user can appear visually focused (e.g., looking at the screen) while actually being off-task (e.g., watching videos).
+1. A replay stream of pre-collected Raspberry Pi camera predictions.
+2. The laptop activity logger.
+3. A fusion loop that updates `data/fused_focus_log.csv`.
+4. The Streamlit dashboard at `frontend/dashboard.py`.
 
-This reveals a fundamental gap between:
-- **Visual engagement**
-- **True task-related focus**
+You can also run the pieces manually:
 
-PiFocus addresses this by explicitly modeling both.
+```bash
+python3 src/replay_camera_stream.py
+python3 laptop/activity_logger.py --task_mode writing --duration 900
+python3 src/fusion_engine.py
+streamlit run frontend/dashboard.py
+```
 
----
+## Demo Replay Mode
+
+For a stable classroom/demo setting, PiFocus includes a replay mode. The Raspberry Pi camera feature logger collects real camera-derived features locally, and `src/replay_camera_stream.py` replays pre-collected camera predictions over time.
+
+This replay mode does **not** fabricate camera predictions and does **not** claim that the Raspberry Pi camera is live during replay. It is a controlled replay of collected camera prediction rows so the rest of the local pipeline can be demonstrated reliably.
+
+The laptop context side can be run live with `laptop/activity_logger.py`. For privacy-safe controlled demos, `src/create_demo_activity_log.py` can generate `data/demo_activity_log.csv` using neutral inferred activity labels.
+
+The activity labels represent inferred context from observable signals. They do not imply direct detection of external devices such as phones.
+
+## Privacy Notes
+
+PiFocus is designed as a local, consent-based prototype:
+
+- No raw video is stored by the dashboard/fusion pipeline.
+- No screenshots are stored.
+- No keystrokes are stored.
+- No audio is stored.
+- Activity context is limited to app/window metadata, task mode, and idle time.
+
+Generated or local runtime files such as `data/activity_log.csv`, `data/live_camera_predictions.csv`, and `data/fused_focus_log.csv` should not be committed unless intentionally shared as sample data.
 
 ## System Architecture
-            +----------------------+
-            | Raspberry Pi Camera |
-            +----------+----------+
-                       |
-                       v
-          Visual Attention Model
-                       |
-                       v
-            visual_attention_score
 
-            +----------------------+
-            | Laptop Activity Log |
-            +----------+----------+
-                       |
-                       v
-           Task Relevance Estimator
-                       |
-                       v
-            task_relevance_score
+```text
+Raspberry Pi camera features
+        |
+        v
+Visual attention prediction
+        |
+        v
+Camera prediction stream  +  Laptop activity context
+        |                         |
+        +-----------+-------------+
+                    v
+             Fusion engine
+                    |
+                    v
+       Accumulated focus risk dashboard
+```
 
-                       |
-                       v
-             Fusion & Risk Engine
-                       |
-                       v
-               Focus Risk State
+## Fusion States
 
----
-
-## Key Components
-
-### 1. Visual Attention (Edge - Raspberry Pi)
-
-- Face detection
-- Face stability (movement, centeredness)
-- Presence (face ratio)
-- Derived attention score
-
-Model:
-- Logistic Regression
-- Random Forest
-
----
-
-### 2. Task Context (Laptop - Consent-Based)
-
-- Active application / window title
-- Idle time
-- User-defined task mode (e.g., writing, coding, lecture)
-
-Example:
-
-| App | Task Mode | Relevance |
-|-----|----------|----------|
-| VSCode | coding | on-task |
-| YouTube | writing | off-task |
-| PDF reader | reading | on-task |
-
----
-
-### 3. Fusion Engine
-
-Instead of binary classification:
-
-The system outputs:
+The fusion engine emits these user-facing states:
 
 - `focused_on_task`
 - `present_but_off_task`
-- `absent`
+- `absent_or_disengaged`
 - `uncertain`
 
----
+It also computes:
 
-## Results
+- `task_relevance_score`
+- `instantaneous_risk_score`
+- `accumulated_risk_score`
+- `risk_level`
 
-We trained classifiers on collected camera data.
+The accumulated risk score is intentionally temporal: brief anomalies should not immediately trigger a strong warning, while sustained off-task behavior should increase risk.
 
-### Confusion Matrix (Random Forest)
+## Repository Structure
 
-- High accuracy (~96%)
-- BUT: model relies heavily on visual stability
+```text
+data/       Demo input CSVs and sample prediction data
+frontend/   Streamlit dashboard
+laptop/     Local laptop activity logger
+models/     Trained visual attention model
+results/    Earlier model evaluation artifacts
+src/        Prediction, replay, demo data, and fusion scripts
+```
 
-### Key Finding
+Some older root-level scripts from the initial prototype are kept for project history. The current demo entrypoint is `run_live_demo.py`.
 
-> The model captures physical presence and posture, but cannot reliably distinguish true task focus.
+## Requirements
 
-This validates the need for task context integration.
+Main Python packages:
 
----
+- pandas
+- numpy
+- scikit-learn
+- joblib
+- streamlit
+- streamlit-autorefresh optional, dashboard has a fallback refresh path
 
-## Demo
+Install example:
 
-The demo includes:
+```bash
+pip install pandas numpy scikit-learn joblib streamlit streamlit-autorefresh
+```
 
-- Real camera-based attention signals
-- Simulated or real task context
-- Real-time focus risk estimation
-- Temporal smoothing and risk accumulation
+## Results and Motivation
 
----
-
-## Why This Matters
-
-PiFocus reframes focus detection as:
-
-> Not "Is the user focused?"  
-> But "Is the user engaged with the intended task over time?"
-
-This approach is:
-- More robust
-- More realistic
-- More aligned with real-world behavior
-
----
+Earlier experiments showed that camera-only models can capture physical presence and posture, but cannot reliably infer whether a visually engaged user is actually working on the intended task. This motivates combining visual attention with task context and temporal risk accumulation.
 
 ## Limitations
 
-- Camera-only signals cannot capture cognitive intent
-- Task context currently simplified (no deep semantic understanding)
-- Privacy considerations for activity logging
-
----
-
-## Future Work
-
-- Lightweight on-device activity classification
-- Multimodal signals (keyboard, audio)
-- Temporal modeling (RNN / sequence models)
-- Personalized behavior modeling
-
----
-
-## Tech Stack
-
-- Python
-- OpenCV
-- scikit-learn
-- Raspberry Pi
-- Pandas / NumPy
-
----
+- Camera-derived signals do not reveal cognitive intent.
+- Activity context is rule-based in this prototype.
+- Replay mode is for stable demonstration, not a claim of live camera capture.
+- The dashboard and fusion pipeline are local research/demo tools, not production monitoring software.
 
 ## Author
 
 Jiayi Wang  
 Columbia University  
 Electrical Engineering
-
----
 
 ## License
 
