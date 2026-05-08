@@ -64,7 +64,7 @@ PiFocus is designed as a local, consent-based prototype:
 - No audio is stored.
 - Activity context is limited to app/window metadata, task mode, and idle time.
 
-Generated, replay, or local runtime CSV files in `data/` are intentionally not committed. Keep real demo recordings and generated logs local, or share them separately only when there is explicit consent.
+Generated or local runtime files such as `data/activity_log.csv`, `data/live_camera_predictions.csv`, and `data/fused_focus_log.csv` should not be committed unless intentionally shared as sample data.
 
 ## System Architecture
 
@@ -106,7 +106,7 @@ The accumulated risk score is intentionally temporal: brief anomalies should not
 ## Repository Structure
 
 ```text
-data/       Local runtime data directory; CSV files are ignored by git
+data/       Demo input CSVs and sample prediction data
 frontend/   Streamlit dashboard
 laptop/     Local laptop activity logger
 models/     Trained visual attention model
