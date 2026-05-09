@@ -14,6 +14,7 @@ The active code path is:
 
 ```text
 src/pi_camera_feature_extractor.py   Raspberry Pi/OpenCV camera feature extraction
+src/train_visual_attention_model.py  Model training from labeled camera features
 src/predict_camera_attention.py      ML + heuristic visual attention prediction
 laptop/activity_logger.py            Consent-based laptop activity logger
 src/fusion_engine.py                 Camera/activity fusion and risk accumulation
@@ -49,7 +50,17 @@ python3 src/pi_camera_feature_extractor.py --output_csv data/live_camera_feature
 Then the prediction step converts those features into camera attention predictions:
 
 ```bash
-python3 src/predict_camera_attention.py   --input_csv data/live_camera_features.csv   --output_csv data/live_camera_predictions.csv
+python3 src/predict_camera_attention.py \
+  --input_csv data/live_camera_features.csv \
+  --output_csv data/live_camera_predictions.csv
+```
+
+To retrain the visual attention model from labeled camera features:
+
+```bash
+python3 src/train_visual_attention_model.py \
+  --input_csv data/session_features_v2.csv \
+  --model_output models/visual_attention_model.pkl
 ```
 
 Manual laptop/dashboard commands:
@@ -127,7 +138,7 @@ idle_seconds
 - movement stability
 - rule-based `focus_score`
 
-Those columns match `src/predict_camera_attention.py`, which combines the trained model probability with the feature-based `focus_score` so strong visual evidence is not suppressed by an unreliable probability column.
+Those columns match both `src/train_visual_attention_model.py` and `src/predict_camera_attention.py`. The training script uses labeled rows from `data/session_features_v2.csv` to produce `models/visual_attention_model.pkl`; the prediction script combines the trained model probability with the feature-based `focus_score` so strong visual evidence is not suppressed by an unreliable probability column.
 
 ## Privacy Notes
 
