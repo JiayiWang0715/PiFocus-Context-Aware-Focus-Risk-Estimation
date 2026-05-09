@@ -230,8 +230,12 @@ Earlier experiments showed that camera-only models can capture physical presence
 
 ## Author
 
-Jiayi Wang  
-Columbia University  
+Jiayi Wang<br>
+Columbia University<br>
+Electrical Engineering
+
+Tongxuan Li<br>
+Columbia University<br>
 Electrical Engineering
 
 ## License
