@@ -228,16 +228,6 @@ Earlier experiments showed that camera-only models can capture physical presence
 - Activity context is rule-based in this prototype.
 - The dashboard and fusion pipeline are local research tools, not production monitoring software.
 
-## Author
-
-Jiayi Wang<br>
-Columbia University<br>
-Electrical Engineering
-
-Tongxuan Li<br>
-Columbia University<br>
-Electrical Engineering
-
 ## License
 
 MIT License
